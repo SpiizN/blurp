@@ -1,6 +1,6 @@
 # Burp Community with Reburp and MCP
 
-This stack runs Burp Suite Community Edition 2026.10.1, loads Reburp 1.1.15, and exposes a Streamable HTTP MCP server at `http://127.0.0.1:8765/mcp`. The server reads Reburp's live OpenAPI specification and provides access to all 206 operations through four MCP tools.
+This stack runs Burp Suite Community Edition 2026.10.1, loads Reburp 1.1.15, and exposes a Streamable HTTP MCP server at `http://127.0.0.1:8765/mcp`. Docker Compose pulls prebuilt private images from GHCR. The server reads Reburp's live OpenAPI specification and provides access to all 206 operations through four MCP tools.
 
 ```text
 Agent -> 127.0.0.1:8765/mcp -> MCP server -> 127.0.0.1:9090/api -> Burp Community
@@ -10,24 +10,33 @@ The MCP container shares the Burp container's network because Reburp listens onl
 
 ## Getting started
 
-Requirements: Docker with Compose and approximately 4 GB of memory available for the stack.
+Requirements: Docker with Compose, access to the private GHCR packages, and approximately 4 GB of memory available for the stack.
 
 1. Read the [PortSwigger license agreement](https://portswigger.net/burp/eula), especially Addendum D for Community Edition.
-2. Copy `.env.example` to `.env`. Set `BURP_ACCEPT_EULA=true` if you accept the agreement, and set `MCP_BEARER_TOKEN` to at least 32 random characters, such as the output of `openssl rand -hex 32`. Protect the file with `chmod 600 .env`.
-3. Start the stack:
+2. Run `docker login ghcr.io -u SpiizN` and enter a GitHub personal access token (classic) with `read:packages` access when prompted for a password. The token also needs access to these private packages.
+3. Copy `.env.example` to `.env`. Set `BURP_ACCEPT_EULA=true` if you accept the agreement, and set `MCP_BEARER_TOKEN` to at least 32 random characters, such as the output of `openssl rand -hex 32`. Protect the file with `chmod 600 .env`.
+4. Start the stack:
 
    ```sh
-   docker compose up -d --build
+   docker compose up -d
    ```
 
-4. Check both services:
+5. Check both services:
 
    ```sh
    docker compose ps
    docker compose exec burp curl -fsS http://127.0.0.1:9090/api/status
    ```
 
-The first build downloads the official Burp and Reburp JARs and verifies their SHA-256 checksums. The first startup can take several dozen seconds. `docker compose down` stops the stack and retains Burp preferences in the `burp-home` volume.
+The first startup can take several dozen seconds. `docker compose down` stops the stack and retains Burp preferences in the `burp-home` volume. Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` in `.env` to run both images from a specific commit instead of `latest`.
+
+## Prebuilt images
+
+The [publish workflow](.github/workflows/publish-images.yaml) runs on every push to `main`. It builds `linux/amd64` and `linux/arm64` variants of `ghcr.io/spiizn/blurp-burp` and `ghcr.io/spiizn/blurp-mcp`, then publishes `latest` and `sha-<full commit SHA>` tags. It uses the repository's `GITHUB_TOKEN` with `packages: write`; no publishing token needs to be stored in the repository.
+
+New GHCR packages are private by default. The workflow requires a private repository and refuses to publish to an existing package whose visibility is not private. If a package already exists but is not linked to this repository, grant this repository write access to the package before running the workflow.
+
+For local image changes, run `docker compose up -d --build --pull never`. The Burp Dockerfile downloads the official Burp and Reburp JARs and verifies their SHA-256 checksums.
 
 ## Connecting an agent
 

@@ -1,7 +1,8 @@
 services:
   burp:
-    image: blurp-burp:local
+    image: ghcr.io/spiizn/blurp-burp:${BLURP_IMAGE_TAG:-latest}
     build: ./burp
+    pull_policy: always
     init: true
     ports:
       - "127.0.0.1:8765:8765"
@@ -17,7 +18,9 @@ services:
       start_period: 60s
 
   mcp:
+    image: ghcr.io/spiizn/blurp-mcp:${BLURP_IMAGE_TAG:-latest}
     build: ./mcp
+    pull_policy: always
     network_mode: service:burp
     depends_on:
       burp:

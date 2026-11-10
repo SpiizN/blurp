@@ -1,0 +1,18 @@
+services:
+  burp:
+    image: blurp-burp:local
+    build: ./burp
+    init: true
+    environment:
+      BURP_ACCEPT_EULA: ${BURP_ACCEPT_EULA:-}
+    volumes:
+      - burp-home:/home/burp
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9090/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+volumes:
+  burp-home:

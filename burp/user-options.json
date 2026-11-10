@@ -1,0 +1,20 @@
+{
+  "user_options": {
+    "extender": {
+      "extensions": [
+        {
+          "extension_file": "/opt/burp/reburp.jar",
+          "extension_type": "java",
+          "loaded": true,
+          "name": "reburp",
+          "errors": "ui",
+          "output": "ui"
+        }
+      ],
+      "settings": {
+        "automatically_reload_extensions_on_startup": true,
+        "automatically_update_bapps_on_startup": false
+      }
+    }
+  }
+}

@@ -63,6 +63,14 @@ click_percent "$wizard" 92 95
 for attempt in $(seq 1 180); do
     kill -0 "$burp_pid" 2>/dev/null || { wait "$burp_pid"; exit 1; }
     if curl --fail --silent --max-time 2 http://127.0.0.1:9090/api/status >/dev/null; then
+        main_window=$(window_id '^Burp Suite Community Edition v.* - Temporary Project$' || true)
+        if [ -z "$main_window" ]; then
+            echo "Burp startup failed: the main window is missing after reburp became ready" >&2
+            kill "$burp_pid"
+            exit 1
+        fi
+        xdotool windowsize "$main_window" 1920 1080
+        xdotool windowmove "$main_window" 0 0
         echo "Burp Community and reburp are ready"
         wait "$burp_pid"
         exit $?

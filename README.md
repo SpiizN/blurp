@@ -6,7 +6,7 @@ Cette stack lance Burp Suite Community Edition 2026.10.1, charge Reburp 1.1.15 e
 Agent -> 127.0.0.1:8765/mcp -> serveur MCP -> 127.0.0.1:9090/api -> Burp Community
 ```
 
-Le conteneur MCP partage le réseau du conteneur Burp, car Reburp n'écoute que sur `127.0.0.1:9090`. Le port 9090 n'est pas publié sur l'hôte. Burp utilise un affichage Xvfb interne pour franchir ses écrans de démarrage, sans interface graphique exposée.
+Le conteneur MCP partage le réseau du conteneur Burp, car Reburp n'écoute que sur `127.0.0.1:9090`. Le port 9090 n'est pas publié sur l'hôte. Burp utilise un affichage Xvfb interne de 1920 x 1080, sans interface graphique exposée. Sa fenêtre occupe tout l'écran virtuel, ce qui donne des captures Reburp de 1920 x 1080 via `/api/ui/screenshot`.
 
 ## Démarrage
 

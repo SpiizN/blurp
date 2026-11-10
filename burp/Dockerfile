@@ -28,4 +28,4 @@ COPY --chown=burp:burp start.sh /opt/burp/start.sh
 USER burp
 WORKDIR /home/burp
 
-ENTRYPOINT ["xvfb-run", "-a", "sh", "/opt/burp/start.sh"]
+ENTRYPOINT ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24", "sh", "/opt/burp/start.sh"]

@@ -9,6 +9,7 @@ from urllib.parse import quote
 import httpx
 import uvicorn
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, PlainTextResponse
@@ -56,9 +57,9 @@ async def get_openapi(reburp_url: str) -> dict[str, Any]:
             response.raise_for_status()
             spec = response.json()
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Failed to load Reburp OpenAPI from {reburp_url}: {exc}") from exc
+        raise ToolError(f"Failed to load Reburp OpenAPI from {reburp_url}: {exc}") from exc
     if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict):
-        raise RuntimeError(f"Invalid Reburp OpenAPI document at {reburp_url}/openapi.json")
+        raise ToolError(f"Invalid Reburp OpenAPI document at {reburp_url}/openapi.json")
     return spec
 
 
@@ -67,12 +68,12 @@ def find_operation(spec: dict[str, Any], operation_id: str) -> tuple[str, str, d
         for method, operation in path_item.items():
             if method in HTTP_METHODS and operation.get("operationId") == operation_id:
                 return path, method, operation
-    raise ValueError(f"Unknown Reburp operationId: {operation_id}. Use search_operations first.")
+    raise ToolError(f"Unknown Reburp operationId: {operation_id}. Use search_operations first.")
 
 
 def resolve_ref(spec: dict[str, Any], ref: str) -> Any:
     if not ref.startswith("#/"):
-        raise ValueError(f"Unsupported OpenAPI reference: {ref}")
+        raise ToolError(f"Unsupported OpenAPI reference: {ref}")
     value: Any = spec
     for part in ref[2:].split("/"):
         value = value[part.replace("~1", "/").replace("~0", "~")]
@@ -103,7 +104,7 @@ def scalar(value: Any) -> str:
         return str(value).lower()
     if isinstance(value, (str, int, float)):
         return str(value)
-    raise ValueError(f"Unsupported parameter value type: {type(value).__name__}")
+    raise ToolError(f"Unsupported parameter value type: {type(value).__name__}")
 
 
 def parameter_pairs(values: dict[str, Any]) -> list[tuple[str, str]]:
@@ -150,7 +151,7 @@ async def status(session_id: str, session_token: str) -> dict[str, Any]:
                 response.raise_for_status()
                 return response.json()
         except (httpx.HTTPError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"Failed to read Reburp status at {reburp_url}: {exc}") from exc
+            raise ToolError(f"Failed to read Reburp status at {reburp_url}: {exc}") from exc
 
 
 @mcp.tool()
@@ -159,7 +160,7 @@ async def search_operations(
 ) -> dict[str, Any]:
     """Search live Reburp operations by name, path, description, or tag. Results are paginated."""
     if offset < 0 or not 1 <= limit <= 100:
-        raise ValueError("offset must be nonnegative and limit must be between 1 and 100")
+        raise ToolError("offset must be nonnegative and limit must be between 1 and 100")
     async with manager.use(session_id, session_token) as reburp_url:
         spec = await get_openapi(reburp_url)
     matches = []
@@ -247,7 +248,7 @@ async def call_reburp_operation(
     } - query_parameters.keys()
     unknown_query = query_parameters.keys() - expected_query
     if missing_path or unknown_path or missing_query or unknown_query:
-        raise ValueError(
+        raise ToolError(
             f"Invalid parameters for {operation_id}: missing path={sorted(missing_path)}, "
             f"unknown path={sorted(unknown_path)}, missing query={sorted(missing_query)}, "
             f"unknown query={sorted(unknown_query)}"
@@ -256,9 +257,9 @@ async def call_reburp_operation(
         path = path.replace("{" + name + "}", quote(scalar(value), safe=""))
     request_body = operation.get("requestBody")
     if request_body and request_body.get("required") and body is None:
-        raise ValueError(f"{operation_id} requires a JSON body")
+        raise ToolError(f"{operation_id} requires a JSON body")
     if body is not None and not request_body:
-        raise ValueError(f"{operation_id} does not accept a request body")
+        raise ToolError(f"{operation_id} does not accept a request body")
 
     try:
         async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
@@ -269,7 +270,7 @@ async def call_reburp_operation(
                 json=body if body is not None else None,
             )
     except httpx.HTTPError as exc:
-        raise RuntimeError(f"Failed to call {operation_id} ({method.upper()} {path_template}): {exc}") from exc
+        raise ToolError(f"Failed to call {operation_id} ({method.upper()} {path_template}): {exc}") from exc
 
     content_type = response.headers.get("content-type", "")
     if not response.content:
@@ -278,7 +279,7 @@ async def call_reburp_operation(
         try:
             result = response.json()
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
+            raise ToolError(
                 f"Invalid JSON response from {operation_id} ({method.upper()} {path_template}): {exc}"
             ) from exc
     elif content_type.startswith("text/"):

@@ -15,6 +15,7 @@ from typing import AsyncIterator, Any
 import docker
 import httpx
 from docker.errors import DockerException, NotFound
+from mcp.server.mcpserver.exceptions import ToolError
 
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ class SessionManager:
         async with self.lock:
             allocated = sum(session.state != "failed" for session in self.sessions.values())
             if allocated >= self.max_sessions:
-                raise RuntimeError(f"Burp session limit reached ({self.max_sessions})")
+                raise ToolError(f"Burp session limit reached ({self.max_sessions})")
             session_id = str(uuid.uuid4())
             token = secrets.token_urlsafe(32)
             session = BurpSession(session_id, hashlib.sha256(token.encode()).digest())
@@ -127,12 +128,12 @@ class SessionManager:
 
     async def extend(self, session_id: str, session_token: str, seconds: int) -> dict[str, Any]:
         if not 1 <= seconds <= 3600:
-            raise ValueError("seconds must be between 1 and 3600")
+            raise ToolError("seconds must be between 1 and 3600")
         async with self.lock:
             session = self._authorize(session_id, session_token)
             self._expire_if_needed(session)
             if session.state != "ready" or session.expires_at is None:
-                raise RuntimeError(f"Burp session {session_id} is {session.state}, not ready")
+                raise ToolError(f"Burp session {session_id} is {session.state}, not ready")
             session.expires_at = max(session.expires_at, time.monotonic()) + seconds
             return self._describe(session)
 
@@ -152,7 +153,7 @@ class SessionManager:
             session = self._authorize(session_id, session_token)
             self._expire_if_needed(session)
             if session.state != "ready" or session.reburp_url is None:
-                raise RuntimeError(f"Burp session {session_id} is {session.state}, not ready")
+                raise ToolError(f"Burp session {session_id} is {session.state}, not ready")
             session.active_calls += 1
             session.expires_at = max(session.expires_at or 0, time.monotonic() + self.idle_seconds)
             reburp_url = session.reburp_url
@@ -171,7 +172,7 @@ class SessionManager:
         session = self.sessions.get(session_id)
         supplied_hash = hashlib.sha256(session_token.encode()).digest()
         if session is None or not hmac.compare_digest(session.token_hash, supplied_hash):
-            raise ValueError(f"Unknown or unauthorized Burp session: {session_id}")
+            raise ToolError(f"Unknown or unauthorized Burp session: {session_id}")
         return session
 
     def _expire_if_needed(self, session: BurpSession) -> None:

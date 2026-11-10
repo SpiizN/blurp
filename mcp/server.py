@@ -2,20 +2,23 @@ import base64
 import hmac
 import json
 import os
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 from urllib.parse import quote
 
 import httpx
 import uvicorn
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from session_manager import SessionManager
 
-REBURP_URL = os.environ.get("REBURP_URL", "http://127.0.0.1:9090").rstrip("/")
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 mcp = MCPServer("reburp")
+manager = SessionManager()
 
 
 class BearerAuth:
@@ -46,16 +49,16 @@ class BearerAuth:
         await response(scope, receive, send)
 
 
-async def get_openapi() -> dict[str, Any]:
+async def get_openapi(reburp_url: str) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
-            response = await client.get(f"{REBURP_URL}/openapi.json")
+            response = await client.get(f"{reburp_url}/openapi.json")
             response.raise_for_status()
             spec = response.json()
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Failed to load Reburp OpenAPI from {REBURP_URL}: {exc}") from exc
+        raise RuntimeError(f"Failed to load Reburp OpenAPI from {reburp_url}: {exc}") from exc
     if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict):
-        raise RuntimeError(f"Invalid Reburp OpenAPI document at {REBURP_URL}/openapi.json")
+        raise RuntimeError(f"Invalid Reburp OpenAPI document at {reburp_url}/openapi.json")
     return spec
 
 
@@ -114,25 +117,51 @@ def parameter_pairs(values: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 @mcp.tool()
-async def status() -> dict[str, Any]:
+async def start_burp() -> dict[str, str]:
+    """Start an isolated Burp instance and return its session ID and token."""
+    return await manager.start()
+
+
+@mcp.tool()
+async def burp_session_status(session_id: str, session_token: str) -> dict[str, Any]:
+    """Read the startup state and remaining idle time of a Burp session."""
+    return await manager.status(session_id, session_token)
+
+
+@mcp.tool()
+async def extend_burp(session_id: str, session_token: str, seconds: int) -> dict[str, Any]:
+    """Add seconds to the idle deadline of a ready Burp session, up to 3600 per call."""
+    return await manager.extend(session_id, session_token, seconds)
+
+
+@mcp.tool()
+async def stop_burp(session_id: str, session_token: str) -> dict[str, str]:
+    """Stop a Burp session after its active calls finish."""
+    return await manager.stop(session_id, session_token)
+
+
+@mcp.tool()
+async def status(session_id: str, session_token: str) -> dict[str, Any]:
     """Check whether Burp Community and Reburp are running."""
-    try:
-        async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
-            response = await client.get(f"{REBURP_URL}/api/status")
-            response.raise_for_status()
-            return response.json()
-    except (httpx.HTTPError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Failed to read Reburp status at {REBURP_URL}: {exc}") from exc
+    async with manager.use(session_id, session_token) as reburp_url:
+        try:
+            async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
+                response = await client.get(f"{reburp_url}/api/status")
+                response.raise_for_status()
+                return response.json()
+        except (httpx.HTTPError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Failed to read Reburp status at {reburp_url}: {exc}") from exc
 
 
 @mcp.tool()
 async def search_operations(
-    query: str = "", tag: str = "", offset: int = 0, limit: int = 50
+    session_id: str, session_token: str, query: str = "", tag: str = "", offset: int = 0, limit: int = 50
 ) -> dict[str, Any]:
     """Search live Reburp operations by name, path, description, or tag. Results are paginated."""
     if offset < 0 or not 1 <= limit <= 100:
         raise ValueError("offset must be nonnegative and limit must be between 1 and 100")
-    spec = await get_openapi()
+    async with manager.use(session_id, session_token) as reburp_url:
+        spec = await get_openapi(reburp_url)
     matches = []
     for path, path_item in spec["paths"].items():
         for method, operation in path_item.items():
@@ -168,9 +197,10 @@ async def search_operations(
 
 
 @mcp.tool()
-async def describe_operation(operation_id: str) -> dict[str, Any]:
+async def describe_operation(operation_id: str, session_id: str, session_token: str) -> dict[str, Any]:
     """Read one live OpenAPI operation, including request/response schemas and examples."""
-    spec = await get_openapi()
+    async with manager.use(session_id, session_token) as reburp_url:
+        spec = await get_openapi(reburp_url)
     path, method, operation = find_operation(spec, operation_id)
     return {
         "operation_id": operation_id,
@@ -184,12 +214,25 @@ async def describe_operation(operation_id: str) -> dict[str, Any]:
 @mcp.tool()
 async def call_operation(
     operation_id: str,
+    session_id: str,
+    session_token: str,
     path_parameters: dict[str, Any] | None = None,
     query_parameters: dict[str, Any] | None = None,
     body: Any = None,
 ) -> dict[str, Any]:
     """Call a Reburp operation by operationId. Describe it first to get exact parameters and JSON body."""
-    spec = await get_openapi()
+    async with manager.use(session_id, session_token) as reburp_url:
+        return await call_reburp_operation(reburp_url, operation_id, path_parameters, query_parameters, body)
+
+
+async def call_reburp_operation(
+    reburp_url: str,
+    operation_id: str,
+    path_parameters: dict[str, Any] | None,
+    query_parameters: dict[str, Any] | None,
+    body: Any,
+) -> dict[str, Any]:
+    spec = await get_openapi(reburp_url)
     path, method, operation = find_operation(spec, operation_id)
     path_template = path
     parameters = spec["paths"][path].get("parameters", []) + operation.get("parameters", [])
@@ -221,7 +264,7 @@ async def call_operation(
         async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
             response = await client.request(
                 method.upper(),
-                f"{REBURP_URL}{path}",
+                f"{reburp_url}{path}",
                 params=parameter_pairs(query_parameters),
                 json=body if body is not None else None,
             )
@@ -264,4 +307,16 @@ if __name__ == "__main__":
         json_response=True,
         transport_security=security,
     )
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(application: Starlette) -> AsyncIterator[None]:
+        await manager.startup()
+        try:
+            async with original_lifespan(application):
+                yield
+        finally:
+            await manager.shutdown()
+
+    app.router.lifespan_context = lifespan
     uvicorn.run(BearerAuth(app, token), host="0.0.0.0", port=8765)

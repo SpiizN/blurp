@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 10001 mcp
 
-COPY server.py relay.py ./
+COPY server.py relay.py session_manager.py ./
 USER mcp
 
 CMD ["python", "server.py"]

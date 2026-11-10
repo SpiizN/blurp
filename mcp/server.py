@@ -4,7 +4,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 import uvicorn
@@ -298,9 +298,26 @@ if __name__ == "__main__":
     token = os.environ.get("MCP_BEARER_TOKEN", "")
     if len(token) < 32 or any(character.isspace() for character in token):
         raise RuntimeError("MCP_BEARER_TOKEN must contain at least 32 characters and no whitespace")
+    allowed_hosts = ["127.0.0.1:*", "localhost:*"]
+    allowed_origins = ["http://127.0.0.1:*", "http://localhost:*"]
+    public_origin = os.environ.get("MCP_PUBLIC_ORIGIN", "")
+    if public_origin:
+        parsed_origin = urlsplit(public_origin)
+        if (
+            parsed_origin.scheme != "https"
+            or not parsed_origin.hostname
+            or parsed_origin.username is not None
+            or parsed_origin.password is not None
+            or parsed_origin.path
+            or parsed_origin.query
+            or parsed_origin.fragment
+        ):
+            raise RuntimeError("MCP_PUBLIC_ORIGIN must be an HTTPS origin without a path")
+        allowed_hosts.append(parsed_origin.netloc)
+        allowed_origins.append(public_origin)
     security = TransportSecuritySettings(
-        allowed_hosts=["127.0.0.1:*", "localhost:*"],
-        allowed_origins=["http://127.0.0.1:*", "http://localhost:*"],
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
     )
     app = mcp.streamable_http_app(
         host="0.0.0.0",

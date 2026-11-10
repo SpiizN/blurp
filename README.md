@@ -1,37 +1,35 @@
 # Burp Community with Reburp and MCP
 
-This stack exposes one Streamable HTTP MCP server at `http://127.0.0.1:8765/mcp`. The server creates an isolated Burp Suite Community Edition 2026.10.1 instance with Reburp 1.1.15 for each active session. Each session has its own Burp container, private Docker network, and temporary project. No Burp container runs until an agent calls `start_burp`.
+This stack exposes one Streamable HTTP MCP server at `http://127.0.0.1:8765/mcp`. The server creates an isolated Burp Suite Community Edition 2026.10.1 instance with Reburp 1.1.15 for each active session inside a dedicated Docker-in-Docker daemon. Each session has its own Burp container, private nested Docker network, and temporary project. No Burp container runs until an agent calls `start_burp`.
 
 ```text
-Agent -> 127.0.0.1:8765/mcp -> session manager -> private relay -> Reburp -> Burp
+Agent -> 127.0.0.1:8765/mcp -> session manager -> TLS -> Docker-in-Docker -> relay -> Reburp -> Burp
 ```
 
-Reburp listens only on `127.0.0.1:9090` inside each Burp container. A small relay shares that container's network namespace and makes Reburp reachable only on the session's private Docker network. Neither Reburp nor the relay publishes a host port. Burp uses an internal 1920 x 1080 Xvfb display, with no graphical interface exposed.
+Reburp listens only on `127.0.0.1:9090` inside each Burp container. A small relay shares that container's network namespace. Docker-in-Docker assigns the relay an ephemeral port on its own container, which the MCP server can reach on the Compose network. Neither Reburp nor the relay publishes a port on the host. Burp uses an internal 1920 x 1080 Xvfb display, with no graphical interface exposed.
 
 ## Getting started
 
-Requirements: Docker with Compose, access to the private GHCR packages, and approximately 4 GB of memory for each active Burp session.
+Requirements: Docker with Compose, Bash, access to the private GHCR packages, and approximately 4 GB of memory for each active Burp session.
 
 1. Read the [PortSwigger license agreement](https://portswigger.net/burp/eula), especially Addendum D for Community Edition.
 2. Run `docker login ghcr.io -u SpiizN` and enter a GitHub personal access token (classic) with `read:packages` access when prompted for a password. The token also needs access to these private packages.
 3. Copy `.env.example` to `.env`. Set `BURP_ACCEPT_EULA=true` if you accept the agreement, and set `MCP_BEARER_TOKEN` to at least 32 random characters, such as the output of `openssl rand -hex 32`. Protect the file with `chmod 600 .env`.
-4. Pull both images and start the MCP server:
+4. Pull both images, load them into Docker-in-Docker, and start the MCP server:
 
    ```sh
-   docker compose pull burp-image mcp
-   docker compose up -d
+   ./start.sh
    docker compose ps
    ```
 
-The `burp-image` Compose service exists only for pulling or building the image. Its profile keeps it stopped during `docker compose up`. The manager starts Burp containers only when requested through MCP. `docker compose down` stops the manager and its active sessions. If the manager exits unexpectedly, its next startup removes orphaned sessions belonging to the same Compose project.
+The `burp-image` Compose service exists only for pulling or building the image. Its profile keeps it stopped during startup. `start.sh` transfers the Burp and MCP images from the host Docker image store into the nested daemon when their image IDs differ. The first transfer can take several minutes. The manager starts Burp containers only when requested through MCP. `docker compose down` stops the manager and its active sessions while retaining the nested daemon's images and TLS certificates in Docker volumes. If the manager exits unexpectedly, its next startup removes orphaned sessions from the nested daemon.
 
 When upgrading from the earlier single-Burp stack, finish any work in that temporary project, then stop the old `burp` container before starting the new manager. The old container owns host port 8765, so the new manager cannot start until it stops. Compose may then report it as an orphan. Its `burp-home` volume is not deleted or reused by the new session containers.
 
 Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` in `.env` to run both images from a specific commit. Set `MCP_PORT` to change the host loopback port. For local image changes, set `BLURP_IMAGE_TAG=local`, then run:
 
 ```sh
-docker compose build burp-image mcp
-docker compose up -d --pull never
+./start.sh --local
 ```
 
 ## Connecting an agent
@@ -67,6 +65,6 @@ New GHCR packages are private by default. The workflow requires a private reposi
 
 Burp Community does not include Professional-only features. Scanner, Collaborator, and AI operations may return `403`. Community projects are temporary and held in memory. Session containers have no persistent home volume, so their traffic history and preferences disappear when the session ends.
 
-The MCP manager needs access to the Docker socket to create and remove session containers. Docker socket access grants control over the host Docker daemon, so keep the manager on the host loopback interface with a strong bearer token. Reburp's shell executor is disabled by default. Call operations that generate traffic only against targets you are authorized to test.
+The MCP manager does not mount the host Docker socket. It connects to the nested daemon over TLS with a client certificate mounted read-only. The nested daemon's API and relay ports are not published on the host. Keep the MCP endpoint on the host loopback interface with a strong bearer token. The Docker-in-Docker service runs with `privileged: true`, which grants substantial access to the host's Docker environment; it removes direct host socket access but is not a strong security boundary. Use a separate VM or host if you need that boundary. See the [Docker-in-Docker image documentation](https://hub.docker.com/_/docker) and [Docker's privileged-container warning](https://docs.docker.com/reference/cli/docker/container/run/#escalate-container-privileges---privileged). Reburp's shell executor is disabled by default. Call operations that generate traffic only against targets you are authorized to test.
 
 Versions and specifications: [Burp 2026.10.1](https://portswigger.net/burp/releases/professional-community-2026-10-1), [Reburp 1.1.15](https://github.com/forefy/reburp/releases/tag/v1.1.15), [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/run/).

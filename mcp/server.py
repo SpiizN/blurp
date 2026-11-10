@@ -1,18 +1,49 @@
 import base64
+import hmac
 import json
 import os
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+import uvicorn
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 REBURP_URL = os.environ.get("REBURP_URL", "http://127.0.0.1:9090").rstrip("/")
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 mcp = MCPServer("reburp")
+
+
+class BearerAuth:
+    def __init__(self, app: ASGIApp, token: str) -> None:
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        authorization_headers = [
+            value for name, value in scope["headers"] if name.lower() == b"authorization"
+        ]
+        if len(authorization_headers) == 1:
+            authorization = authorization_headers[0].decode("latin-1")
+            scheme, separator, supplied_token = authorization.partition(" ")
+            if separator and scheme.lower() == "bearer" and hmac.compare_digest(supplied_token, self.token):
+                await self.app(scope, receive, send)
+                return
+
+        response = PlainTextResponse(
+            "Unauthorized",
+            status_code=401,
+            headers={"WWW-Authenticate": 'Bearer realm="reburp-mcp"'},
+        )
+        await response(scope, receive, send)
 
 
 async def get_openapi() -> dict[str, Any]:
@@ -220,15 +251,17 @@ async def health(_: Any) -> JSONResponse:
 
 
 if __name__ == "__main__":
+    token = os.environ.get("MCP_BEARER_TOKEN", "")
+    if len(token) < 32 or any(character.isspace() for character in token):
+        raise RuntimeError("MCP_BEARER_TOKEN must contain at least 32 characters and no whitespace")
     security = TransportSecuritySettings(
         allowed_hosts=["127.0.0.1:*", "localhost:*"],
         allowed_origins=["http://127.0.0.1:*", "http://localhost:*"],
     )
-    mcp.run(
-        transport="streamable-http",
+    app = mcp.streamable_http_app(
         host="0.0.0.0",
-        port=8765,
         stateless_http=True,
         json_response=True,
         transport_security=security,
     )
+    uvicorn.run(BearerAuth(app, token), host="0.0.0.0", port=8765)

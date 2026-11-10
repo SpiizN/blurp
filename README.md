@@ -13,7 +13,7 @@ Le conteneur MCP partage le réseau du conteneur Burp, car Reburp n'écoute que 
 Prérequis : Docker avec Compose et environ 4 Go de mémoire disponibles pour la stack.
 
 1. Lisez les [conditions d'utilisation de PortSwigger](https://portswigger.net/burp/eula), notamment l'addendum D pour Community Edition.
-2. Copiez `.env.example` vers `.env` et mettez `BURP_ACCEPT_EULA=true` si vous acceptez ces conditions.
+2. Copiez `.env.example` vers `.env`. Mettez `BURP_ACCEPT_EULA=true` si vous acceptez ces conditions et renseignez `MCP_BEARER_TOKEN` avec au moins 32 caractères aléatoires, par exemple la sortie de `openssl rand -hex 32`. Protégez le fichier avec `chmod 600 .env`.
 3. Lancez la stack :
 
    ```sh
@@ -25,14 +25,13 @@ Prérequis : Docker avec Compose et environ 4 Go de mémoire disponibles pour la
    ```sh
    docker compose ps
    docker compose exec burp curl -fsS http://127.0.0.1:9090/api/status
-   curl -fsS http://127.0.0.1:8765/health
    ```
 
 Le premier build télécharge les JAR officiels de Burp et de Reburp et vérifie leurs empreintes SHA-256. Le premier démarrage peut prendre quelques dizaines de secondes. `docker compose down` arrête la stack et conserve les préférences Burp dans le volume `burp-home`.
 
 ## Connexion d'un agent
 
-Configurez votre client MCP pour utiliser l'URL `http://127.0.0.1:8765/mcp` avec le transport Streamable HTTP. Les outils disponibles sont :
+Configurez votre client MCP pour utiliser l'URL `http://127.0.0.1:8765/mcp` avec le transport Streamable HTTP et l'en-tête `Authorization: Bearer <MCP_BEARER_TOKEN>`, en prenant la valeur dans `.env`. Le même en-tête est requis par `/health`. Les outils disponibles sont :
 
 | Outil | Usage |
 | --- | --- |
@@ -49,6 +48,6 @@ Flux conseillé : cherchez une opération, consultez sa description, puis appele
 
 Burp Community n'inclut pas les fonctions réservées à Professional. Les opérations Scanner, Collaborator et AI peuvent répondre `403`. Les projets Community sont temporaires en mémoire : les préférences Burp persistent dans le volume, mais l'historique de trafic ne survit pas à un redémarrage.
 
-Le MCP n'a pas d'authentification et n'est publié que sur la boucle locale de l'hôte. Toute application locale pouvant joindre ce port peut piloter Burp. Gardez cette liaison locale et n'appelez les opérations générant du trafic que sur des cibles que vous êtes autorisé à tester. L'exécuteur shell de Reburp est désactivé par défaut.
+Le MCP exige le bearer token et n'est publié que sur la boucle locale de l'hôte. Gardez le token secret, conservez cette liaison locale et n'appelez les opérations générant du trafic que sur des cibles que vous êtes autorisé à tester. L'exécuteur shell de Reburp est désactivé par défaut.
 
 Versions et contrats : [Burp 2026.10.1](https://portswigger.net/burp/releases/professional-community-2026-10-1), [Reburp 1.1.15](https://github.com/forefy/reburp/releases/tag/v1.1.15), [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/run/).

@@ -1,0 +1,13 @@
+services:
+  mcp:
+    networks:
+      default: {}
+      proxy:
+        aliases: ["blurp-mcp"]
+    environment:
+      MCP_PUBLIC_ORIGIN: ${MCP_PUBLIC_ORIGIN:?Set MCP_PUBLIC_ORIGIN to the public HTTPS origin}
+
+networks:
+  proxy:
+    external: true
+    name: ${CADDY_NETWORK:-blurp-proxy}

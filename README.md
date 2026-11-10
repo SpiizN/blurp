@@ -32,6 +32,26 @@ Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` in `.env` to run both images from a 
 ./start.sh --local
 ```
 
+## Caddy reverse proxy
+
+Use [compose.caddy.yaml](compose.caddy.yaml) when Caddy runs in another container on an existing Docker network. Add these values to `.env` on the VPS, replacing the example domain with the HTTPS origin served by Caddy:
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.caddy.yaml
+CADDY_NETWORK=blurp-proxy
+MCP_PUBLIC_ORIGIN=https://blurp.example.com
+```
+
+The `CADDY_NETWORK` network must already exist, and the Caddy container must be attached to it. The overlay attaches only the MCP container to that network under the `blurp-mcp` alias. The Docker-in-Docker daemon stays on the stack's private network. Start the stack with `./start.sh`, or `./start.sh --local` for local builds. Configure Caddy to forward the whole site without a path rewrite:
+
+```caddyfile
+blurp.example.com {
+    reverse_proxy blurp-mcp:8765
+}
+```
+
+Connect MCP clients to `https://blurp.example.com/mcp` with the same bearer token. `MCP_PUBLIC_ORIGIN` must match the public HTTPS origin exactly, without a trailing slash. The MCP server allows that origin and host while keeping the localhost entries for its health check. Caddy forwards the `Authorization` header by default; no additional header rule is required. See the [Caddy reverse proxy documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).
+
 ## Connecting an agent
 
 Configure your MCP client to use `http://127.0.0.1:8765/mcp` with Streamable HTTP transport and the `Authorization: Bearer <MCP_BEARER_TOKEN>` header, using the token from `.env`. The `/health` endpoint requires the same header.

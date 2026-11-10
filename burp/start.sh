@@ -29,7 +29,7 @@ for attempt in $(seq 1 120); do
     selector=$(window_id '^Burp Suite$' || true)
     wizard=$(window_id '^Burp Suite Community Edition v' || true)
     if [ -n "$selector" ]; then
-        click_percent "$selector" 46 77
+        click_percent "$selector" 46 78
         break
     fi
     [ -n "$wizard" ] && break

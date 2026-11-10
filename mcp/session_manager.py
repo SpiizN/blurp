@@ -108,7 +108,10 @@ class SessionManager:
 
     async def start(self) -> dict[str, str]:
         async with self.lock:
-            allocated = sum(session.state != "failed" for session in self.sessions.values())
+            allocated = sum(
+                session.state != "failed" or session.network_id is not None
+                for session in self.sessions.values()
+            )
             if allocated >= self.max_sessions:
                 raise ToolError(f"Burp session limit reached ({self.max_sessions})")
             session_id = str(uuid.uuid4())
@@ -229,6 +232,11 @@ class SessionManager:
                         session.state = "cleanup_failed"
                         session.error += f"; cleanup failed: {cleanup_exc}"
                         logger.error(session.error)
+                else:
+                    async with self.lock:
+                        session.burp_id = None
+                        session.relay_id = None
+                        session.network_id = None
 
     async def _wait_ready(self, session: BurpSession) -> None:
         if session.reburp_url is None:

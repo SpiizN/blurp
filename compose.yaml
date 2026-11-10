@@ -1,38 +1,29 @@
 services:
-  burp:
+  burp-image:
     image: ghcr.io/spiizn/blurp-burp:${BLURP_IMAGE_TAG:-latest}
     build: ./burp
-    pull_policy: always
-    init: true
-    ports:
-      - "127.0.0.1:8765:8765"
-    environment:
-      BURP_ACCEPT_EULA: ${BURP_ACCEPT_EULA:-}
-    volumes:
-      - burp-home:/home/burp
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9090/api/status"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 60s
+    profiles: ["image"]
 
   mcp:
     image: ghcr.io/spiizn/blurp-mcp:${BLURP_IMAGE_TAG:-latest}
     build: ./mcp
     pull_policy: always
-    network_mode: service:burp
-    depends_on:
-      burp:
-        condition: service_healthy
+    init: true
+    user: "0:0"
+    stop_grace_period: 150s
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8765}:8765"
     environment:
-      REBURP_URL: http://127.0.0.1:9090
+      BURP_ACCEPT_EULA: ${BURP_ACCEPT_EULA:-}
+      BURP_IMAGE: ghcr.io/spiizn/blurp-burp:${BLURP_IMAGE_TAG:-latest}
+      MCP_IMAGE: ghcr.io/spiizn/blurp-mcp:${BLURP_IMAGE_TAG:-latest}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:?Set MCP_BEARER_TOKEN in .env}
+      BURP_IDLE_SECONDS: ${BURP_IDLE_SECONDS:-300}
+      MAX_BURP_SESSIONS: ${MAX_BURP_SESSIONS:-2}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8765/health', headers={'Authorization': 'Bearer ' + os.environ['MCP_BEARER_TOKEN']}); urllib.request.urlopen(request, timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 6
-
-volumes:
-  burp-home:

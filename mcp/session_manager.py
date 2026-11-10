@@ -3,9 +3,7 @@ import hashlib
 import hmac
 import logging
 import os
-import re
 import secrets
-import socket
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -14,7 +12,7 @@ from typing import AsyncIterator, Any
 
 import docker
 import httpx
-from docker.errors import DockerException, NotFound
+from docker.errors import DockerException, ImageNotFound, NotFound
 from mcp.server.mcpserver.exceptions import ToolError
 
 
@@ -48,8 +46,8 @@ class BurpSession:
 class SessionManager:
     def __init__(self) -> None:
         self.client: docker.DockerClient | None = None
-        self.manager_id = ""
-        self.project = ""
+        self.project = "blurp"
+        self.reburp_host = os.environ.get("REBURP_HOST", "dind")
         self.burp_image = os.environ.get("BURP_IMAGE", "")
         self.mcp_image = os.environ.get("MCP_IMAGE", "")
         try:
@@ -71,11 +69,13 @@ class SessionManager:
         try:
             self.client = docker.from_env()
             await asyncio.to_thread(self.client.ping)
-            manager = await asyncio.to_thread(self.client.containers.get, socket.gethostname())
-            self.manager_id = manager.id
-            self.project = manager.labels.get("com.docker.compose.project", "")
-            if not self.project:
-                raise RuntimeError("The MCP container must be started by Docker Compose")
+            for image in (self.burp_image, self.mcp_image):
+                try:
+                    await asyncio.to_thread(self.client.images.get, image)
+                except ImageNotFound as exc:
+                    raise RuntimeError(
+                        f"Image {image} is missing from Docker-in-Docker. Run ./start.sh to load it"
+                    ) from exc
             await asyncio.to_thread(self._remove_orphans)
         except DockerException as exc:
             raise RuntimeError(f"Failed to initialize Docker session management: {exc}") from exc
@@ -270,8 +270,7 @@ class SessionManager:
 
     def _create_resources(self, session_id: str) -> tuple[str, str, str, str]:
         assert self.client is not None
-        project_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", self.project)
-        name = f"{project_name}-blurp-{session_id}"
+        name = f"blurp-{session_id}"
         labels = {
             "io.blurp.managed": "true",
             "io.blurp.project": self.project,
@@ -281,12 +280,12 @@ class SessionManager:
         try:
             network = self.client.networks.create(name, driver="bridge", labels=labels)
             network_id = network.id
-            network.connect(self.manager_id)
             burp = self.client.containers.run(
                 self.burp_image,
                 detach=True,
                 name=name,
                 network=network.name,
+                ports={"9091/tcp": None},
                 environment={"BURP_ACCEPT_EULA": "true"},
                 labels={**labels, "io.blurp.role": "burp"},
                 init=True,
@@ -303,10 +302,10 @@ class SessionManager:
             )
             relay_id = relay.id
             burp.reload()
-            ip_address = burp.attrs["NetworkSettings"]["Networks"][network.name]["IPAddress"]
-            if not ip_address:
-                raise RuntimeError(f"Burp container {burp_id} has no address on {network.name}")
-            return burp_id, relay_id, network_id, f"http://{ip_address}:9091"
+            bindings = burp.attrs["NetworkSettings"]["Ports"].get("9091/tcp") or []
+            if not bindings or not bindings[0].get("HostPort"):
+                raise RuntimeError(f"Burp container {burp_id} has no published relay port")
+            return burp_id, relay_id, network_id, f"http://{self.reburp_host}:{bindings[0]['HostPort']}"
         except Exception as exc:
             partial = BurpSession(
                 session_id,
@@ -353,8 +352,6 @@ class SessionManager:
             network = self.client.networks.get(network_id)
         except NotFound:
             return
-        if self.manager_id in network.attrs.get("Containers", {}):
-            network.disconnect(self.manager_id, force=True)
         network.remove()
 
     def _remove_resources(self, session: BurpSession) -> None:

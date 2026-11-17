@@ -6,8 +6,11 @@ ARG REBURP_VERSION=1.1.15
 ARG REBURP_SHA256=0290f63303839331391c06a8e07008dff0d6a61e78a6c26d7e1c320ebf149054
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl jq stunnel4 xvfb xauth \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl jq stunnel4 xvfb xauth \
+        libxi6 libxrender1 libxtst6 xdotool \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 burp
 
 RUN mkdir -p /opt/burp \
     && curl --fail --location --retry 3 --output /opt/burp/burp.jar \
@@ -16,11 +19,6 @@ RUN mkdir -p /opt/burp \
     && curl --fail --location --retry 3 --output /opt/burp/reburp.jar \
         "https://github.com/forefy/reburp/releases/download/v${REBURP_VERSION}/reburp-${REBURP_VERSION}.jar" \
     && echo "${REBURP_SHA256}  /opt/burp/reburp.jar" | sha256sum --check
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libxi6 libxrender1 libxtst6 xdotool \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 burp
 
 COPY --chown=burp:burp user-options.json /opt/burp/user-options.json
 COPY --chown=burp:burp start.sh /opt/burp/start.sh

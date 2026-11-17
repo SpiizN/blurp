@@ -10,4 +10,4 @@ services:
 networks:
   proxy:
     external: true
-    name: ${CADDY_NETWORK:-blurp-proxy}
+    name: ${CADDY_NETWORK:-proxprox-proxy}

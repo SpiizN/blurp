@@ -1,4 +1,5 @@
 import asyncio
+import sys
 
 
 async def forward(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -15,7 +16,8 @@ async def forward(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:
         upstream_reader, upstream_writer = await asyncio.open_connection("127.0.0.1", 9090)
-    except OSError:
+    except OSError as exc:
+        print(f"Relay could not connect to Reburp at 127.0.0.1:9090: {exc}", file=sys.stderr)
         writer.close()
         await writer.wait_closed()
         return

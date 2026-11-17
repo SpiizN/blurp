@@ -48,7 +48,6 @@ class SessionManager:
     def __init__(self) -> None:
         self.client: docker.DockerClient | None = None
         self.project = "blurp"
-        self.reburp_host = os.environ.get("REBURP_HOST", "dind")
         self.burp_image = os.environ.get("BURP_IMAGE", "")
         self.mcp_image = os.environ.get("MCP_IMAGE", "")
         self.proxprox_host = os.environ.get("PROXPROX_PROXY_HOST", "")
@@ -312,7 +311,7 @@ class SessionManager:
             or use_user_options is not True
         ):
             raise RuntimeError(
-                "Burp did not load the required Proxprox upstream rule. Rebuild and reload both blurp images with ./start.sh --local"
+                "Burp did not load the required Proxprox upstream rule. Update both blurp images with ./start.sh"
             )
 
     def _container_state(self, container_id: str) -> str:
@@ -362,7 +361,7 @@ class SessionManager:
             bindings = burp.attrs["NetworkSettings"]["Ports"].get("9091/tcp") or []
             if not bindings or not bindings[0].get("HostPort"):
                 raise RuntimeError(f"Burp container {burp_id} has no published relay port")
-            return burp_id, relay_id, network_id, f"http://{self.reburp_host}:{bindings[0]['HostPort']}"
+            return burp_id, relay_id, network_id, f"http://docker:{bindings[0]['HostPort']}"
         except Exception as exc:
             partial = BurpSession(
                 session_id,

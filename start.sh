@@ -34,7 +34,9 @@ docker compose up -d --wait dind
 
 for image in "$burp_image" "$mcp_image"; do
     host_id=$(docker image inspect --format '{{.Id}}' "$image")
-    nested_id=$(docker compose exec -T dind docker -H unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)
+    if ! nested_id=$(docker compose exec -T dind docker -H unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$image" 2>/dev/null); then
+        nested_id=
+    fi
     if [[ "$host_id" != "$nested_id" ]]; then
         docker image save "$image" | docker compose exec -T dind docker -H unix:///var/run/docker.sock image load
     fi

@@ -38,7 +38,6 @@ services:
       BURP_ACCEPT_EULA: ${BURP_ACCEPT_EULA:-}
       BURP_IMAGE: ghcr.io/spiizn/blurp-burp:${BLURP_IMAGE_TAG:-latest}
       MCP_IMAGE: ghcr.io/spiizn/blurp-mcp:${BLURP_IMAGE_TAG:-latest}
-      REBURP_HOST: docker
       DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client

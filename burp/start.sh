@@ -96,26 +96,23 @@ java -Xmx2g -jar /opt/burp/burp.jar \
     --user-config-file=/home/burp/user-options.json &
 burp_pid=$!
 
-for attempt in $(seq 1 120); do
+selector_clicked=false
+wizard=
+for attempt in $(seq 1 240); do
     kill -0 "$burp_pid" 2>/dev/null || { wait "$burp_pid"; exit 1; }
-    selector=$(window_id '^Burp Suite$' || true)
     wizard=$(window_id '^Burp Suite Community Edition v' || true)
-    if [ -n "$selector" ]; then
-        click_percent "$selector" 46 78
-        break
+    [ -n "$wizard" ] && break
+    if [ "$selector_clicked" = false ]; then
+        selector=$(window_id '^Burp Suite$' || true)
+        if [ -n "$selector" ]; then
+            click_percent "$selector" 46 78
+            selector_clicked=true
+        fi
     fi
-    [ -n "$wizard" ] && break
     sleep 0.5
 done
 
-for attempt in $(seq 1 120); do
-    kill -0 "$burp_pid" 2>/dev/null || { wait "$burp_pid"; exit 1; }
-    wizard=$(window_id '^Burp Suite Community Edition v' || true)
-    [ -n "$wizard" ] && break
-    sleep 0.5
-done
-
-if [ -z "${wizard:-}" ]; then
+if [ -z "$wizard" ]; then
     echo "Burp Community startup failed: project wizard did not appear" >&2
     kill "$burp_pid"
     exit 1

@@ -1,94 +1,62 @@
-# Burp Community with Reburp and MCP
+# BlurP
 
-This stack exposes one Streamable HTTP MCP server at `http://127.0.0.1:8765/mcp`. The server creates an isolated Burp Suite Community Edition 2026.10.1 instance with Reburp 1.1.15 for each active session inside a dedicated Docker-in-Docker daemon. Each session has its own Burp container, private nested Docker network, and temporary project. No Burp container runs until an agent calls `start_burp`.
+BlurP exposes Burp Suite Community Edition 2026.10.1 through a Streamable HTTP MCP server. Each `start_burp` call creates a temporary Burp instance with Reburp 1.1.15 in a dedicated Docker-in-Docker daemon. Sessions do not share Burp settings, traffic history, or project files.
 
-```text
-Agent -> 127.0.0.1:8765/mcp -> session manager -> TLS -> Docker-in-Docker -> relay -> Reburp -> Burp
-```
+Burp sends outgoing HTTP and HTTPS requests through Proxprox. Inside each Burp container, a local HTTP proxy bridge carries traffic over verified TLS to the Proxprox HTTPS endpoint. Proxprox then selects the VPN and upstream proxy from its scope rules. The manager checks Burp's loaded upstream rule before marking a session ready. Reburp listens only on the Burp container's loopback interface; a private relay lets the MCP server reach it.
 
-Reburp listens only on `127.0.0.1:9090` inside each Burp container. A small relay shares that container's network namespace. Docker-in-Docker assigns the relay an ephemeral port on its own container, which the MCP server can reach on the Compose network. Neither Reburp nor the relay publishes a port on the host. Burp uses an internal 1920 x 1080 Xvfb display, with no graphical interface exposed.
+## Start
 
-Every Burp session sends its outgoing HTTP and HTTPS traffic to Proxprox. Burp connects to a loopback HTTP proxy inside its own container; stunnel verifies the public Proxprox certificate and carries the proxy connection over TLS. Burp uses Basic proxy authentication, and Proxprox selects the VPN and upstream proxy for each destination from its scope rules. The MCP-to-Reburp control connection stays on the private Docker network. If the Proxprox TLS endpoint is unavailable, its certificate is invalid, or Burp did not load the required upstream rule, the session fails to start instead of sending traffic directly.
+Requirements: Docker with Compose, Bash, access to the private GHCR images, and about 4 GB of memory per active Burp session. Read the [PortSwigger license agreement](https://portswigger.net/burp/eula) before setting `BURP_ACCEPT_EULA=true`.
 
-## Getting started
+1. Log in to GHCR with a GitHub token that can read the private `blurp-burp` and `blurp-mcp` packages: `docker login ghcr.io -u SpiizN`.
+2. Copy `.env.example` to `.env`, set `BURP_ACCEPT_EULA=true`, generate an `MCP_BEARER_TOKEN` of at least 32 characters, and set `PROXPROX_PROXY_TOKEN` to the `PROXY_TOKEN` from Proxprox. Keep `.env` private with `chmod 600 .env`.
+3. Run `./start.sh`. It pulls both GHCR images, loads changed images into Docker-in-Docker, and starts the MCP server. Check it with `docker compose ps`.
 
-Requirements: Docker with Compose, Bash, access to the private GHCR packages, and approximately 4 GB of memory for each active Burp session.
+The defaults use `proxy.proxprox.spiizn.xyz:18443` for Proxprox. Change `PROXPROX_PROXY_HOST` and `PROXPROX_PROXY_PORT` in `.env` if needed. The endpoint must be reachable from the Burp containers with a trusted TLS certificate. Burp sessions fail to start if the endpoint is unavailable or Burp does not load the required upstream rule. A wrong Proxprox password causes proxy authentication failures when Burp sends requests.
 
-1. Read the [PortSwigger license agreement](https://portswigger.net/burp/eula), especially Addendum D for Community Edition.
-2. Run `docker login ghcr.io -u SpiizN` and enter a GitHub personal access token (classic) with `read:packages` access when prompted for a password. The token also needs access to these private packages.
-3. Copy `.env.example` to `.env`. Set `BURP_ACCEPT_EULA=true` if you accept the agreement, and set `MCP_BEARER_TOKEN` to at least 32 random characters, such as the output of `openssl rand -hex 32`. Set `PROXPROX_PROXY_TOKEN` to the same value as `PROXY_TOKEN` in the Proxprox stack's `.env`. Set `PROXPROX_PROXY_HOST` and `PROXPROX_PROXY_PORT` to the public HTTPS proxy endpoint if they differ from the defaults. Protect the file with `chmod 600 .env`.
-4. Pull both images, load them into Docker-in-Docker, and start the MCP server:
+Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` to pin both images to one release. For unpublished source changes, set `BLURP_IMAGE_TAG=local` and run `./start.sh --local`. The default `./start.sh` pulls from GHCR; it does not build local source.
 
-   ```sh
-   ./start.sh
-   docker compose ps
-   ```
+## Caddy
 
-The `burp-image` Compose service exists only for pulling or building the image. Its profile keeps it stopped during startup. `start.sh` transfers the Burp and MCP images from the host Docker image store into the nested daemon when their image IDs differ. The first transfer can take several minutes. The manager starts Burp containers only when requested through MCP. `docker compose down` stops the manager and its active sessions while retaining the nested daemon's images and TLS certificates in Docker volumes. If the manager exits unexpectedly, its next startup removes orphaned sessions from the nested daemon.
-
-The Proxprox proxy DNS name must resolve from the VPS and TCP port 18443 must be reachable from the Burp containers. The proxy password is passed through container environments and written to each temporary Burp container's user configuration; it is never baked into the Burp image. Agents with access to Reburp configuration export operations can read it, so give the blurp MCP token only to agents that are allowed to use the Proxprox proxy. Rotating `PROXY_TOKEN` requires updating `PROXPROX_PROXY_TOKEN` and restarting blurp sessions.
-
-When upgrading from the earlier single-Burp stack, finish any work in that temporary project, then stop the old `burp` container before starting the new manager. The old container owns host port 8765, so the new manager cannot start until it stops. Compose may then report it as an orphan. Its `burp-home` volume is not deleted or reused by the new session containers.
-
-Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` in `.env` to run both images from a specific commit. Set `MCP_PORT` to change the host loopback port. For local image changes, set `BLURP_IMAGE_TAG=local`, then run:
-
-```sh
-./start.sh --local
-```
-
-## Caddy reverse proxy
-
-Use [compose.caddy.yaml](compose.caddy.yaml) when Caddy runs in another container on an existing Docker network. Add these values to `.env` on the VPS, replacing the example domain with the HTTPS origin served by Caddy:
+The MCP server binds to `127.0.0.1:8765` on the host. To expose it through an existing Caddy container on the `proxprox-proxy` Docker network, add these lines to `.env`:
 
 ```dotenv
 COMPOSE_FILE=compose.yaml:compose.caddy.yaml
-CADDY_NETWORK=blurp-proxy
-MCP_PUBLIC_ORIGIN=https://blurp.example.com
+CADDY_NETWORK=proxprox-proxy
+MCP_PUBLIC_ORIGIN=https://blurp.spiizn.xyz
 ```
 
-The `CADDY_NETWORK` network must already exist, and the Caddy container must be attached to it. The overlay attaches only the MCP container to that network under the `blurp-mcp` alias. The Docker-in-Docker daemon stays on the stack's private network. Start the stack with `./start.sh`, or `./start.sh --local` for local builds. Configure Caddy to forward the whole site without a path rewrite:
+The overlay attaches only the MCP container to that network as `blurp-mcp`. Add this site to the existing Caddyfile and reload Caddy:
 
 ```caddyfile
-blurp.example.com {
+blurp.spiizn.xyz {
     reverse_proxy blurp-mcp:8765
 }
 ```
 
-Connect MCP clients to `https://blurp.example.com/mcp` with the same bearer token. `MCP_PUBLIC_ORIGIN` must match the public HTTPS origin exactly, without a trailing slash. The MCP server allows that origin and host while keeping the localhost entries for its health check. Caddy forwards the `Authorization` header by default; no additional header rule is required. See the [Caddy reverse proxy documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).
+Point `blurp.spiizn.xyz` at the VPS. MCP clients use `https://blurp.spiizn.xyz/mcp` with `Authorization: Bearer <MCP_BEARER_TOKEN>`. `MCP_PUBLIC_ORIGIN` must match the HTTPS origin exactly, without a trailing slash. The `/health` endpoint requires the same bearer token.
 
-## Connecting an agent
+## MCP sessions
 
-Configure your MCP client to use `http://127.0.0.1:8765/mcp` with Streamable HTTP transport and the `Authorization: Bearer <MCP_BEARER_TOKEN>` header, using the token from `.env`. The `/health` endpoint requires the same header.
+Call `start_burp`, then poll `burp_session_status` until the state is `ready`. Pass its `session_id` and `session_token` to every other tool. Use `search_operations` and `describe_operation` to find the live Reburp API contract before calling `call_operation`. Call `stop_burp` when finished.
 
 | Tool | Purpose |
 | --- | --- |
-| `start_burp` | Create a session and return its UUIDv4 ID, token, and `starting` state. |
-| `burp_session_status` | Check whether the session is `starting` or `ready` and read its remaining idle time. |
-| `extend_burp` | Add 1 to 3600 seconds to a ready session's idle deadline. |
-| `stop_burp` | Stop a session after any active calls finish. |
-| `status` | Check Burp and Reburp versions and editions in a ready session. |
-| `search_operations` | Search live Reburp operations by keyword or tag, with pagination. |
-| `describe_operation` | Read an operation's parameters, JSON schemas, and examples. |
-| `call_operation` | Call an operation by its `operationId` with path and query parameters and a JSON body. |
+| `start_burp` | Start an isolated Burp session. |
+| `burp_session_status` | Read startup state, errors, and idle time. |
+| `extend_burp` | Add 1 to 3600 seconds to the idle deadline. |
+| `stop_burp` | Stop a session after active calls finish. |
+| `status` | Read Burp and Reburp versions. |
+| `search_operations` | Search Reburp operations. |
+| `describe_operation` | Read an operation's parameters and schemas. |
+| `call_operation` | Call a Reburp operation and return its HTTP status and body. |
 
-Call `start_burp()`, then poll `burp_session_status(session_id=..., session_token=...)` until the state is `ready`. Pass the same `session_id` and `session_token` to every other tool. For example, call `search_operations(session_id=..., session_token=..., query="proxy history")`, then `describe_operation(operation_id="getProxyHistory", session_id=..., session_token=...)`, then `call_operation(operation_id="getProxyHistory", session_id=..., session_token=..., query_parameters={"limit": 10})`. Call `stop_burp` when finished.
+Sessions expire after five idle minutes by default. Calls extend the deadline, and startup does not count against it. Configure `BURP_IDLE_SECONDS` and `MAX_BURP_SESSIONS` in `.env`; the default session limit is two. A manager restart removes abandoned containers and invalidates session tokens. Session tokens are credentials and may appear in MCP client traces.
 
-The default idle timeout is five minutes after the session becomes ready. Each call moves the deadline to at least five minutes from that call. `extend_burp` adds time to the current deadline, which later calls do not shorten. Active calls are allowed to finish before a session is removed. Set `BURP_IDLE_SECONDS` and `MAX_BURP_SESSIONS` in `.env` to change the timeout and the maximum number of concurrent sessions. The default limit is two sessions. Burp startup does not count against the idle timeout.
+Burp Community projects are temporary, so session history disappears when a session stops. Professional-only Scanner, Collaborator, and AI operations may return `403`.
 
-Session tokens are returned only by `start_burp`. Treat them as credentials: they are passed in MCP tool arguments and may appear in client-side traces. The server stores only a hash of each token in memory. A manager restart invalidates all session IDs and tokens.
+## Images and access
 
-`call_operation` returns the HTTP status code, content type, and response body. Binary responses are Base64 encoded. Reburp HTTP errors remain visible with their status codes and bodies; transport errors identify the affected operation.
+The [publish workflow](.github/workflows/publish-images.yaml) publishes private `linux/amd64` and `linux/arm64` images to GHCR on pushes to `main`, tagged `latest` and `sha-<full commit SHA>`. The Burp image downloads the official Burp and Reburp JARs and verifies their SHA-256 checksums.
 
-## Prebuilt images
-
-The [publish workflow](.github/workflows/publish-images.yaml) runs on every push to `main`. It builds `linux/amd64` and `linux/arm64` variants of `ghcr.io/spiizn/blurp-burp` and `ghcr.io/spiizn/blurp-mcp`, then publishes `latest` and `sha-<full commit SHA>` tags. It uses the repository's `GITHUB_TOKEN` with `packages: write`; no publishing token needs to be stored in the repository.
-
-New GHCR packages are private by default. The workflow requires a private repository and refuses to publish to an existing package whose visibility is not private. If a package already exists but is not linked to this repository, grant this repository write access to the package before running the workflow. The Burp Dockerfile downloads the official Burp and Reburp JARs and verifies their SHA-256 checksums.
-
-## Limitations and access
-
-Burp Community does not include Professional-only features. Scanner, Collaborator, and AI operations may return `403`. Community projects are temporary and held in memory. Session containers have no persistent home volume, so their traffic history and preferences disappear when the session ends.
-
-The MCP manager does not mount the host Docker socket. It connects to the nested daemon over TLS with a client certificate mounted read-only. The nested daemon's API and relay ports are not published on the host. Keep the MCP endpoint on the host loopback interface with a strong bearer token. The Docker-in-Docker service runs with `privileged: true`, which grants substantial access to the host's Docker environment; it removes direct host socket access but is not a strong security boundary. Use a separate VM or host if you need that boundary. See the [Docker-in-Docker image documentation](https://hub.docker.com/_/docker) and [Docker's privileged-container warning](https://docs.docker.com/reference/cli/docker/container/run/#escalate-container-privileges---privileged). Reburp's shell executor is disabled by default. Call operations that generate traffic only against targets you are authorized to test.
-
-Versions and specifications: [Burp 2026.10.1](https://portswigger.net/burp/releases/professional-community-2026-10-1), [Reburp 1.1.15](https://github.com/forefy/reburp/releases/tag/v1.1.15), [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/run/).
+Only the MCP port is published on the host, on loopback. The manager reaches Docker-in-Docker over TLS without mounting the host Docker socket. Docker-in-Docker runs privileged; use a separate VM or host if you need a stronger isolation boundary. Burp's Proxprox password is passed through container environments and stored in each temporary Burp user configuration. Agents that can export Burp settings through Reburp can read it, so restrict MCP access accordingly. Reburp's shell executor is disabled by default. Send testing traffic only to authorized targets.

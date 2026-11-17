@@ -1,6 +1,6 @@
-# BlurP
+# Blurp
 
-BlurP exposes Burp Suite Community Edition 2026.10.1 through a Streamable HTTP MCP server. Each `start_burp` call creates a temporary Burp instance with Reburp 1.1.15 in a dedicated Docker-in-Docker daemon. Sessions do not share Burp settings, traffic history, or project files.
+Blurp exposes Burp Suite Community Edition 2026.10.1 through a Streamable HTTP MCP server. Each `start_burp` call creates a temporary Burp instance with Reburp 1.1.15 in a dedicated Docker-in-Docker daemon. Sessions do not share Burp settings, traffic history, or project files.
 
 Burp sends outgoing HTTP and HTTPS requests through Proxprox. Inside each Burp container, a local HTTP proxy bridge carries traffic over verified TLS to the Proxprox HTTPS endpoint. Proxprox then selects the VPN and upstream proxy from its scope rules. The manager checks Burp's loaded upstream rule before marking a session ready. Reburp listens only on the Burp container's loopback interface; a private relay lets the MCP server reach it.
 

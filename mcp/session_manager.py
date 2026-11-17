@@ -71,7 +71,7 @@ class SessionManager:
             raise RuntimeError("Set BURP_ACCEPT_EULA=true after accepting the Burp license agreement")
         if not self.proxprox_host or not self.proxprox_port or not self.proxprox_token:
             raise RuntimeError(
-                "Set PROXPROX_PROXY_HOST, PROXPROX_PROXY_PORT, and PROXPROX_PROXY_TOKEN before starting blurp"
+                "Set PROXPROX_PROXY_HOST, PROXPROX_PROXY_PORT, and PROXPROX_PROXY_TOKEN before starting Blurp"
             )
         try:
             self.client = docker.from_env()
@@ -311,7 +311,7 @@ class SessionManager:
             or use_user_options is not True
         ):
             raise RuntimeError(
-                "Burp did not load the required Proxprox upstream rule. Update both blurp images with ./start.sh"
+                "Burp did not load the required Proxprox upstream rule. Update both Blurp images with ./start.sh"
             )
 
     def _container_state(self, container_id: str) -> str:

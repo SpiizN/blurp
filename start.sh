@@ -20,8 +20,8 @@ burp_image=
 mcp_image=
 while IFS= read -r image; do
     case "$image" in
-        ghcr.io/spiizn/blurp-burp:*) burp_image=$image ;;
-        ghcr.io/spiizn/blurp-mcp:*) mcp_image=$image ;;
+        *-burp:*) burp_image=$image ;;
+        *-mcp:*) mcp_image=$image ;;
     esac
 done < <(docker compose --profile image config --images)
 

@@ -8,7 +8,7 @@ Agent -> 127.0.0.1:8765/mcp -> session manager -> TLS -> Docker-in-Docker -> rel
 
 Reburp listens only on `127.0.0.1:9090` inside each Burp container. A small relay shares that container's network namespace. Docker-in-Docker assigns the relay an ephemeral port on its own container, which the MCP server can reach on the Compose network. Neither Reburp nor the relay publishes a port on the host. Burp uses an internal 1920 x 1080 Xvfb display, with no graphical interface exposed.
 
-Every Burp session sends its outgoing HTTP and HTTPS traffic to Proxprox. Burp connects to a loopback HTTP proxy inside its own container; stunnel verifies the public Proxprox certificate and carries the proxy connection over TLS. Burp uses Basic proxy authentication, and Proxprox selects the VPN and upstream proxy for each destination from its scope rules. The MCP-to-Reburp control connection stays on the private Docker network. If the Proxprox TLS endpoint is unavailable or its certificate is invalid, the session fails to start instead of sending traffic directly.
+Every Burp session sends its outgoing HTTP and HTTPS traffic to Proxprox. Burp connects to a loopback HTTP proxy inside its own container; stunnel verifies the public Proxprox certificate and carries the proxy connection over TLS. Burp uses Basic proxy authentication, and Proxprox selects the VPN and upstream proxy for each destination from its scope rules. The MCP-to-Reburp control connection stays on the private Docker network. If the Proxprox TLS endpoint is unavailable, its certificate is invalid, or Burp did not load the required upstream rule, the session fails to start instead of sending traffic directly.
 
 ## Getting started
 

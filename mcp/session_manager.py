@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -258,6 +259,7 @@ class SessionManager:
                 try:
                     response = await client.get(f"{session.reburp_url}/api/status")
                     response.raise_for_status()
+                    await self._verify_proxy_config(client, session.reburp_url)
                     return
                 except httpx.HTTPError as exc:
                     last_error = exc
@@ -269,6 +271,49 @@ class SessionManager:
         raise RuntimeError(
             f"Reburp did not become ready within 360 seconds for {session.session_id}: {last_error}"
         )
+
+    async def _verify_proxy_config(self, client: httpx.AsyncClient, reburp_url: str) -> None:
+        try:
+            user_response = await client.get(
+                f"{reburp_url}/api/config/user",
+                params={"path": "user_options.connections.upstream_proxy"},
+                timeout=10,
+            )
+            user_response.raise_for_status()
+            user_config = json.loads(user_response.json()["result"])
+            servers = user_config["user_options"]["connections"]["upstream_proxy"]["servers"]
+            project_response = await client.get(
+                f"{reburp_url}/api/config/project",
+                params={"path": "project_options.connections.upstream_proxy"},
+                timeout=10,
+            )
+            project_response.raise_for_status()
+            project_config = json.loads(project_response.json()["result"])
+            project_upstream = project_config["project_options"]["connections"]["upstream_proxy"]
+            use_user_options = project_upstream["use_user_options"]
+        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise RuntimeError(f"Read Burp upstream proxy configuration at {reburp_url}: {exc}") from exc
+        if (
+            not isinstance(servers, list)
+            or len(servers) != 1
+            or not isinstance(servers[0], dict)
+            or any(
+                servers[0].get(key) != value
+                for key, value in {
+                    "destination_host": "*",
+                    "enabled": True,
+                    "proxy_host": "127.0.0.1",
+                    "proxy_port": 18081,
+                    "auth_type": "basic",
+                    "username": "proxy",
+                    "password": self.proxprox_token,
+                }.items()
+            )
+            or use_user_options is not True
+        ):
+            raise RuntimeError(
+                "Burp did not load the required Proxprox upstream rule. Rebuild and reload both blurp images with ./start.sh --local"
+            )
 
     def _container_state(self, container_id: str) -> str:
         assert self.client is not None

@@ -6,7 +6,7 @@ ARG REBURP_VERSION=1.1.15
 ARG REBURP_SHA256=0290f63303839331391c06a8e07008dff0d6a61e78a6c26d7e1c320ebf149054
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl xvfb xauth \
+    && apt-get install -y --no-install-recommends ca-certificates curl jq stunnel4 xvfb xauth \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/burp \

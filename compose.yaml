@@ -45,6 +45,9 @@ services:
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:?Set MCP_BEARER_TOKEN in .env}
       BURP_IDLE_SECONDS: ${BURP_IDLE_SECONDS:-300}
       MAX_BURP_SESSIONS: ${MAX_BURP_SESSIONS:-2}
+      PROXPROX_PROXY_HOST: ${PROXPROX_PROXY_HOST:-proxy.proxprox.spiizn.xyz}
+      PROXPROX_PROXY_PORT: ${PROXPROX_PROXY_PORT:-18443}
+      PROXPROX_PROXY_TOKEN: ${PROXPROX_PROXY_TOKEN:?Set PROXPROX_PROXY_TOKEN in .env}
     volumes:
       - dind-client:/certs/client:ro
     healthcheck:

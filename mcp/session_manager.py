@@ -50,6 +50,9 @@ class SessionManager:
         self.reburp_host = os.environ.get("REBURP_HOST", "dind")
         self.burp_image = os.environ.get("BURP_IMAGE", "")
         self.mcp_image = os.environ.get("MCP_IMAGE", "")
+        self.proxprox_host = os.environ.get("PROXPROX_PROXY_HOST", "")
+        self.proxprox_port = os.environ.get("PROXPROX_PROXY_PORT", "")
+        self.proxprox_token = os.environ.get("PROXPROX_PROXY_TOKEN", "")
         try:
             self.idle_seconds = int(os.environ.get("BURP_IDLE_SECONDS", "300"))
             self.max_sessions = int(os.environ.get("MAX_BURP_SESSIONS", "2"))
@@ -66,6 +69,10 @@ class SessionManager:
             raise RuntimeError("BURP_IMAGE and MCP_IMAGE must be set")
         if os.environ.get("BURP_ACCEPT_EULA") != "true":
             raise RuntimeError("Set BURP_ACCEPT_EULA=true after accepting the Burp license agreement")
+        if not self.proxprox_host or not self.proxprox_port or not self.proxprox_token:
+            raise RuntimeError(
+                "Set PROXPROX_PROXY_HOST, PROXPROX_PROXY_PORT, and PROXPROX_PROXY_TOKEN before starting blurp"
+            )
         try:
             self.client = docker.from_env()
             await asyncio.to_thread(self.client.ping)
@@ -286,7 +293,12 @@ class SessionManager:
                 name=name,
                 network=network.name,
                 ports={"9091/tcp": None},
-                environment={"BURP_ACCEPT_EULA": "true"},
+                environment={
+                    "BURP_ACCEPT_EULA": "true",
+                    "PROXPROX_PROXY_HOST": self.proxprox_host,
+                    "PROXPROX_PROXY_PORT": self.proxprox_port,
+                    "PROXPROX_PROXY_TOKEN": self.proxprox_token,
+                },
                 labels={**labels, "io.blurp.role": "burp"},
                 init=True,
             )

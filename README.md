@@ -8,13 +8,15 @@ Agent -> 127.0.0.1:8765/mcp -> session manager -> TLS -> Docker-in-Docker -> rel
 
 Reburp listens only on `127.0.0.1:9090` inside each Burp container. A small relay shares that container's network namespace. Docker-in-Docker assigns the relay an ephemeral port on its own container, which the MCP server can reach on the Compose network. Neither Reburp nor the relay publishes a port on the host. Burp uses an internal 1920 x 1080 Xvfb display, with no graphical interface exposed.
 
+Every Burp session sends its outgoing HTTP and HTTPS traffic to Proxprox. Burp connects to a loopback HTTP proxy inside its own container; stunnel verifies the public Proxprox certificate and carries the proxy connection over TLS. Burp uses Basic proxy authentication, and Proxprox selects the VPN and upstream proxy for each destination from its scope rules. The MCP-to-Reburp control connection stays on the private Docker network. If the Proxprox TLS endpoint is unavailable or its certificate is invalid, the session fails to start instead of sending traffic directly.
+
 ## Getting started
 
 Requirements: Docker with Compose, Bash, access to the private GHCR packages, and approximately 4 GB of memory for each active Burp session.
 
 1. Read the [PortSwigger license agreement](https://portswigger.net/burp/eula), especially Addendum D for Community Edition.
 2. Run `docker login ghcr.io -u SpiizN` and enter a GitHub personal access token (classic) with `read:packages` access when prompted for a password. The token also needs access to these private packages.
-3. Copy `.env.example` to `.env`. Set `BURP_ACCEPT_EULA=true` if you accept the agreement, and set `MCP_BEARER_TOKEN` to at least 32 random characters, such as the output of `openssl rand -hex 32`. Protect the file with `chmod 600 .env`.
+3. Copy `.env.example` to `.env`. Set `BURP_ACCEPT_EULA=true` if you accept the agreement, and set `MCP_BEARER_TOKEN` to at least 32 random characters, such as the output of `openssl rand -hex 32`. Set `PROXPROX_PROXY_TOKEN` to the same value as `PROXY_TOKEN` in the Proxprox stack's `.env`. Set `PROXPROX_PROXY_HOST` and `PROXPROX_PROXY_PORT` to the public HTTPS proxy endpoint if they differ from the defaults. Protect the file with `chmod 600 .env`.
 4. Pull both images, load them into Docker-in-Docker, and start the MCP server:
 
    ```sh
@@ -23,6 +25,8 @@ Requirements: Docker with Compose, Bash, access to the private GHCR packages, an
    ```
 
 The `burp-image` Compose service exists only for pulling or building the image. Its profile keeps it stopped during startup. `start.sh` transfers the Burp and MCP images from the host Docker image store into the nested daemon when their image IDs differ. The first transfer can take several minutes. The manager starts Burp containers only when requested through MCP. `docker compose down` stops the manager and its active sessions while retaining the nested daemon's images and TLS certificates in Docker volumes. If the manager exits unexpectedly, its next startup removes orphaned sessions from the nested daemon.
+
+The Proxprox proxy DNS name must resolve from the VPS and TCP port 18443 must be reachable from the Burp containers. The proxy password is passed through container environments and written to each temporary Burp container's user configuration; it is never baked into the Burp image. Agents with access to Reburp configuration export operations can read it, so give the blurp MCP token only to agents that are allowed to use the Proxprox proxy. Rotating `PROXY_TOKEN` requires updating `PROXPROX_PROXY_TOKEN` and restarting blurp sessions.
 
 When upgrading from the earlier single-Burp stack, finish any work in that temporary project, then stop the old `burp` container before starting the new manager. The old container owns host port 8765, so the new manager cannot start until it stops. Compose may then report it as an orphan. Its `burp-home` volume is not deleted or reused by the new session containers.
 

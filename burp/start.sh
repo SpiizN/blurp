@@ -6,6 +6,78 @@ if [ "${BURP_ACCEPT_EULA:-}" != "true" ]; then
     exit 1
 fi
 
+if [ -z "${PROXPROX_PROXY_TOKEN:-}" ]; then
+    echo "Burp cannot start: PROXPROX_PROXY_TOKEN is empty" >&2
+    exit 1
+fi
+case "${PROXPROX_PROXY_HOST:-}" in
+    ''|*[!a-zA-Z0-9.-]*|.*|-*)
+        echo "Burp cannot start: PROXPROX_PROXY_HOST must be a DNS name" >&2
+        exit 1
+        ;;
+esac
+case "${PROXPROX_PROXY_PORT:-}" in
+    ''|*[!0-9]*)
+        echo "Burp cannot start: PROXPROX_PROXY_PORT must be a TCP port" >&2
+        exit 1
+        ;;
+esac
+if [ "$PROXPROX_PROXY_PORT" -lt 1 ] || [ "$PROXPROX_PROXY_PORT" -gt 65535 ]; then
+    echo "Burp cannot start: PROXPROX_PROXY_PORT must be between 1 and 65535" >&2
+    exit 1
+fi
+
+umask 077
+jq '.user_options.connections.upstream_proxy.servers = [{
+    "destination_host": "*",
+    "enabled": true,
+    "proxy_host": "127.0.0.1",
+    "proxy_port": 18081,
+    "auth_type": "basic",
+    "username": "proxy",
+    "password": env.PROXPROX_PROXY_TOKEN
+}]' /opt/burp/user-options.json > /home/burp/user-options.json
+
+cat > /home/burp/stunnel.conf <<EOF
+foreground = yes
+client = yes
+pid =
+
+[proxprox]
+accept = 127.0.0.1:18081
+connect = ${PROXPROX_PROXY_HOST}:${PROXPROX_PROXY_PORT}
+verifyChain = yes
+CAfile = /etc/ssl/certs/ca-certificates.crt
+checkHost = ${PROXPROX_PROXY_HOST}
+sni = ${PROXPROX_PROXY_HOST}
+sslVersionMin = TLSv1.2
+EOF
+
+unset PROXPROX_PROXY_TOKEN
+stunnel /home/burp/stunnel.conf &
+stunnel_pid=$!
+
+for attempt in $(seq 1 20); do
+    if ! kill -0 "$stunnel_pid" 2>/dev/null; then
+        echo "Burp cannot start: Proxprox TLS bridge exited" >&2
+        wait "$stunnel_pid"
+        exit 1
+    fi
+    if proxy_status=$(curl --silent --show-error --max-time 3 --output /dev/null \
+        --write-out '%{http_code}' --proxy http://127.0.0.1:18081 --noproxy '' \
+        http://example.com/ 2>/home/burp/proxy-check.err); then
+        if [ "$proxy_status" = "407" ]; then
+            break
+        fi
+    fi
+    sleep 1
+done
+if [ "${proxy_status:-}" != "407" ]; then
+    echo "Burp cannot start: Proxprox at ${PROXPROX_PROXY_HOST}:${PROXPROX_PROXY_PORT} did not return the expected unauthenticated 407 response (status ${proxy_status:-unknown})" >&2
+    cat /home/burp/proxy-check.err >&2
+    exit 1
+fi
+
 window_id() {
     xdotool search --onlyvisible --name "$1" 2>/dev/null | sed -n '1p'
 }
@@ -21,7 +93,7 @@ click_percent() {
 
 java -Xmx2g -jar /opt/burp/burp.jar \
     --i-accept-the-license-agreement \
-    --user-config-file=/opt/burp/user-options.json &
+    --user-config-file=/home/burp/user-options.json &
 burp_pid=$!
 
 for attempt in $(seq 1 120); do

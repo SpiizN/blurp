@@ -13,7 +13,7 @@ Requirements: Docker with Compose, Bash, a reachable Proxprox HTTPS proxy, and a
 
 The default `PROXPROX_PROXY_PORT` is 18443. The endpoint must be reachable from the Burp containers with a trusted TLS certificate. Burp sessions fail to start if the endpoint is unavailable or Burp does not load the required upstream rule. A wrong Proxprox password causes proxy authentication failures when Burp sends requests.
 
-For an operator with access to the existing private GHCR packages, set `BLURP_IMAGE_PREFIX=ghcr.io/spiizn/blurp` and `BLURP_IMAGE_TAG=latest` in `.env`, log in with `docker login ghcr.io -u <username>`, and run `./start.sh`. Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` to pin both private images to one release. The default `./start.sh` pulls the image names configured in `.env`; public source users should use `--local`.
+Once the GHCR packages are public and the publishing workflow has run, set `BLURP_IMAGE_PREFIX=ghcr.io/spiizn/blurp` and `BLURP_IMAGE_TAG=latest` in `.env`, then run `./start.sh`. Public images do not require `docker login`. Set `BLURP_IMAGE_TAG=sha-<full commit SHA>` to pin both images to one commit. The default `./start.sh` pulls the image names configured in `.env`; use `--local` to build them from source instead.
 
 ## Caddy
 
@@ -56,7 +56,9 @@ Burp Community projects are temporary, so session history disappears when a sess
 
 ## Source and image access
 
-The public repository does not publish images. The Burp Dockerfile downloads the official Burp and Reburp JARs during a local build and verifies their SHA-256 checksums. Existing GHCR images must stay private. Before making the repository public, check both `blurp-burp` and `blurp-mcp` [package access settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility): keep visibility private, disable inherited access from the repository, and remove the public repository from Actions access. If you need to update those private images later, build and publish them from a separate private environment.
+The [publishing workflow](.github/workflows/publish-images.yaml) builds `ghcr.io/spiizn/blurp-burp` and `ghcr.io/spiizn/blurp-mcp` for amd64 and arm64 on pushes to `main` and manual runs. It publishes `latest` and `sha-<full commit SHA>` tags. Before it can run, set both existing packages to public in their [GHCR package settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility). The workflow stops if either package is not public. Making a package public also exposes its existing versions, and GitHub does not allow changing it back to private.
+
+The Burp image includes the Burp Suite Community Edition and Reburp JARs. The Dockerfile verifies their SHA-256 checksums and includes the Reburp MIT license at `/opt/burp/LICENSE.reburp`. The [PortSwigger license agreement](https://portswigger.net/burp/eula) restricts making Burp available to others; obtain PortSwigger's written permission before making the Burp package public.
 
 No reuse license is granted for this source at present.
 

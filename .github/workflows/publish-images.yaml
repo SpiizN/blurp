@@ -1,0 +1,78 @@
+name: Publish public container images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify-public-packages:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - name: Require public GHCR packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for component in burp mcp; do
+            package="${GITHUB_REPOSITORY#*/}-${component}"
+            response=$(mktemp)
+            status=$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Accept: application/vnd.github+json' \
+              "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package}")
+            if [ "$status" != 200 ]; then
+              echo "::error::Could not verify GHCR package $package: HTTP $status. Create it and make it public before publishing."
+              exit 1
+            fi
+            visibility=$(jq -r '.visibility // empty' "$response")
+            if [ "$visibility" != public ]; then
+              echo "::error::GHCR package $package is ${visibility:-unknown}; change its visibility to public before publishing."
+              exit 1
+            fi
+          done
+
+  publish:
+    needs: verify-public-packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [burp, mcp]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set the image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish ${{ matrix.component }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}

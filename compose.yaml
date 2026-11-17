@@ -26,7 +26,6 @@ services:
   mcp:
     image: ${BLURP_IMAGE_PREFIX:-ghcr.io/spiizn/blurp}-mcp:${BLURP_IMAGE_TAG:-latest}
     build: ./mcp
-    pull_policy: always
     init: true
     stop_grace_period: 150s
     depends_on:
